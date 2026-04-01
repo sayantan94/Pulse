@@ -9,14 +9,14 @@ PATTERNS_FILE="$SCRIPT_DIR/risky-patterns.json"
 
 INPUT=$(cat)
 
-# Single jq parse for all needed fields
-IFS=$'\t' read -r EVENT TOOL RAW_SESSION_ID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "unknown", .cwd // ""] | @tsv' <<< "$INPUT")"
+# Parse fields
+IFS=$'\t' read -r EVENT TOOL _SID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "", .cwd // ""] | @tsv' <<< "$INPUT")"
 
-# Sanitize session ID to be filename-safe (replace / with _)
-SESSION_ID="${RAW_SESSION_ID//\//_}"
-
-SESSION_NAME="${CLAUDE_SESSION_NAME:-}"
-[ -z "$SESSION_NAME" ] && [ -n "$CWD" ] && SESSION_NAME="$CWD"
+# Use CWD as session key (sanitized for filenames)
+SESSION_ID="${CWD//\//_}"
+SESSION_ID="${SESSION_ID:-${_SID//\//_}}"
+SESSION_ID="${SESSION_ID:-unknown}"
+SESSION_NAME="${CLAUDE_SESSION_NAME:-$CWD}"
 SESSION_NAME="${SESSION_NAME:-unnamed}"
 
 STATE_FILE="$STATE_DIR/${SESSION_ID}.json"
