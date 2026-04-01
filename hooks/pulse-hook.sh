@@ -9,10 +9,21 @@ PATTERNS_FILE="$SCRIPT_DIR/risky-patterns.json"
 
 INPUT=$(cat)
 
-# Parse fields
-IFS=$'\t' read -r EVENT TOOL _SID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "", .cwd // ""] | @tsv' <<< "$INPUT")"
+# Parse each field individually to avoid IFS/TSV issues
+EVENT=$(jq -r '.hook_event_name // ""' <<< "$INPUT")
+TOOL=$(jq -r '.tool_name // ""' <<< "$INPUT")
+_SID=$(jq -r '.session_id // ""' <<< "$INPUT")
+CWD=$(jq -r '.cwd // ""' <<< "$INPUT")
 
-# Use CWD as session key (sanitized for filenames)
+# If CWD is missing, look up from cached mapping
+CWD_CACHE="$STATE_DIR/.cwd-${_SID}"
+if [ -z "$CWD" ] && [ -f "$CWD_CACHE" ]; then
+    CWD=$(cat "$CWD_CACHE")
+elif [ -n "$CWD" ] && [ -n "$_SID" ]; then
+    echo "$CWD" > "$CWD_CACHE"
+fi
+
+# Use CWD as session key
 SESSION_ID="${CWD//\//_}"
 SESSION_ID="${SESSION_ID:-${_SID//\//_}}"
 SESSION_ID="${SESSION_ID:-unknown}"
@@ -131,7 +142,7 @@ case "$EVENT" in
         ;;
     SessionEnd)
         write_state "gray" "Session ended"
-        rm -f "$STATE_DIR/${SESSION_ID}.ts" "$STATE_DIR/${SESSION_ID}.failures" "$STATE_DIR/${SESSION_ID}.pid"
+        rm -f "$STATE_DIR/${SESSION_ID}.ts" "$STATE_DIR/${SESSION_ID}.failures" "$STATE_DIR/${SESSION_ID}.pid" "$CWD_CACHE"
         ;;
 esac
 
