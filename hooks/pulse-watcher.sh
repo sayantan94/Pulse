@@ -45,7 +45,7 @@ while true; do
         [ "$CURRENT_STATE" = "gray" ] && continue
 
         if [ "$ELAPSED" -ge "$STUCK_THRESHOLD" ] && [ "$CURRENT_STATE" = "yellow" ]; then
-            write_state "$session" "red" "Stuck: no activity for ${ELAPSED}s"
+            write_state "$session" "orange" "Idle: no activity for ${ELAPSED}s"
         elif [ "$ELAPSED" -ge "$IDLE_THRESHOLD" ] && [ "$CURRENT_STATE" = "green" ]; then
             write_state "$session" "orange" "Idle: waiting for you"
         fi
