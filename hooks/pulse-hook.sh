@@ -10,7 +10,10 @@ PATTERNS_FILE="$SCRIPT_DIR/risky-patterns.json"
 INPUT=$(cat)
 
 # Single jq parse for all needed fields
-read -r EVENT TOOL SESSION_ID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "unknown", .cwd // ""] | @tsv' <<< "$INPUT")"
+read -r EVENT TOOL RAW_SESSION_ID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "unknown", .cwd // ""] | @tsv' <<< "$INPUT")"
+
+# Sanitize session ID to be filename-safe (replace / with _)
+SESSION_ID="${RAW_SESSION_ID//\//_}"
 
 SESSION_NAME="${CLAUDE_SESSION_NAME:-}"
 [ -z "$SESSION_NAME" ] && [ -n "$CWD" ] && SESSION_NAME="$CWD"
@@ -50,9 +53,8 @@ case "$EVENT" in
                     MATCH_MODE=$(jq -r --arg cmd "$COMMAND" '
                         (.blockByDefault // false) as $def |
                         [.patterns[] | .pattern as $p | select($cmd | test($p; "i")) |
-                         if .mode == "block" then "block"
-                         elif .mode == "warn" then "warn"
-                         elif $def then "block"
+                         if $def then "block"
+                         elif .mode == "block" then "block"
                          else "warn" end
                         ] | first // empty
                     ' "$PATTERNS_FILE" 2>/dev/null)
