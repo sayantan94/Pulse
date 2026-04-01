@@ -10,7 +10,7 @@ PATTERNS_FILE="$SCRIPT_DIR/risky-patterns.json"
 INPUT=$(cat)
 
 # Single jq parse for all needed fields
-read -r EVENT TOOL RAW_SESSION_ID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "unknown", .cwd // ""] | @tsv' <<< "$INPUT")"
+IFS=$'\t' read -r EVENT TOOL RAW_SESSION_ID CWD <<< "$(jq -r '[.hook_event_name // "", .tool_name // "", .session_id // "unknown", .cwd // ""] | @tsv' <<< "$INPUT")"
 
 # Sanitize session ID to be filename-safe (replace / with _)
 SESSION_ID="${RAW_SESSION_ID//\//_}"
@@ -78,9 +78,15 @@ case "$EVENT" in
         ;;
     PostToolUse)
         echo 0 > "$STATE_DIR/${SESSION_ID}.failures" 2>/dev/null || true
-        # Don't overwrite orange/red warnings -- let them stay visible
+        # Let orange/red stay visible for 3 seconds before allowing green
         CUR=$(current_state)
-        if [ "$CUR" != "orange" ] && [ "$CUR" != "red" ]; then
+        if [ "$CUR" = "orange" ] || [ "$CUR" = "red" ]; then
+            LAST=$(cat "$TIMESTAMP_FILE" 2>/dev/null || echo 0)
+            NOW=$(date +%s)
+            if [ $((NOW - LAST)) -ge 3 ]; then
+                write_state "green" "Running"
+            fi
+        else
             write_state "green" "Running"
         fi
         ;;
