@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PULSE_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_DIR="$HOME/.pulse"
+BIN_DIR="$HOME/.local/bin"
+SETTINGS="$HOME/.claude/settings.json"
+HOOK_CMD="$INSTALL_DIR/hooks/pulse-hook.sh"
+
+# ─────────────────────────────────────────────
+# Colors
+# ─────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+ok()   { echo -e "  ${GREEN}✓${RESET} $1"; }
+fail() { echo -e "  ${RED}✗${RESET} $1"; }
+warn() { echo -e "  ${YELLOW}!${RESET} $1"; }
+info() { echo -e "  ${DIM}$1${RESET}"; }
+
+# ─────────────────────────────────────────────
+# doctor — check everything is ready
+# ─────────────────────────────────────────────
+cmd_doctor() {
+    echo -e "${BOLD}Pulse Doctor${RESET}\n"
+
+    local all_good=true
+
+    # macOS version
+    local macos_ver
+    macos_ver=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
+    local major
+    major=$(echo "$macos_ver" | cut -d. -f1)
+    if [ "$major" -ge 14 ] 2>/dev/null; then
+        ok "macOS $macos_ver (14+ required)"
+    else
+        fail "macOS $macos_ver (need 14+)"
+        all_good=false
+    fi
+
+    # Swift
+    if command -v swift >/dev/null 2>&1; then
+        local swift_ver
+        swift_ver=$(swift --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        ok "Swift $swift_ver"
+    else
+        fail "Swift not found (install Xcode or Command Line Tools)"
+        all_good=false
+    fi
+
+    # jq
+    if command -v jq >/dev/null 2>&1; then
+        ok "jq $(jq --version 2>&1)"
+    else
+        fail "jq not found (brew install jq)"
+        all_good=false
+    fi
+
+    # Claude Code settings
+    if [ -f "$SETTINGS" ]; then
+        ok "Claude Code settings found"
+    else
+        warn "Claude Code settings not found at $SETTINGS"
+    fi
+
+    # Pulse installed?
+    if [ -x "$BIN_DIR/pulse" ]; then
+        ok "Pulse binary installed at $BIN_DIR/pulse"
+    else
+        warn "Pulse not installed yet (run: ./pulse setup)"
+    fi
+
+    # Pulse running?
+    if pgrep -f "\.local/bin/pulse" >/dev/null 2>&1; then
+        ok "Pulse is running"
+    else
+        warn "Pulse is not running"
+    fi
+
+    # Hooks registered?
+    if [ -f "$SETTINGS" ] && jq -e '.hooks' "$SETTINGS" >/dev/null 2>&1; then
+        local hook_count
+        hook_count=$(jq --arg cmd "$HOOK_CMD" '[.hooks[][]? | select(.hooks[]?.command == $cmd)] | length' "$SETTINGS" 2>/dev/null || echo 0)
+        if [ "$hook_count" -gt 0 ]; then
+            ok "Hooks registered ($hook_count entries)"
+        else
+            warn "No Pulse hooks in Claude Code settings"
+        fi
+    fi
+
+    echo ""
+    if [ "$all_good" = true ]; then
+        echo -e "${GREEN}${BOLD}All good.${RESET}"
+    else
+        echo -e "${RED}${BOLD}Issues found.${RESET} Run ${CYAN}./pulse setup${RESET} to fix."
+    fi
+}
+
+# ─────────────────────────────────────────────
+# setup — install dependencies, build, register
+# ─────────────────────────────────────────────
+cmd_setup() {
+    echo -e "${BOLD}Pulse Setup${RESET}\n"
+
+    # Check Xcode CLI tools
+    if ! xcode-select -p >/dev/null 2>&1; then
+        info "Installing Xcode Command Line Tools..."
+        xcode-select --install
+        echo -e "\n${YELLOW}Restart ./pulse setup after installation completes.${RESET}"
+        exit 0
+    fi
+    ok "Xcode Command Line Tools"
+
+    # Check jq
+    if ! command -v jq >/dev/null 2>&1; then
+        if command -v brew >/dev/null 2>&1; then
+            info "Installing jq..."
+            brew install jq
+            ok "jq installed"
+        else
+            fail "jq not found and Homebrew not available"
+            echo -e "  Install manually: ${CYAN}brew install jq${RESET} or ${CYAN}https://jqlang.github.io/jq/${RESET}"
+            exit 1
+        fi
+    else
+        ok "jq"
+    fi
+
+    # Build
+    info "Building Pulse..."
+    if swift build -c release 2>&1 | tail -1 | grep -q "Build complete"; then
+        ok "Build complete"
+    else
+        fail "Build failed"
+        echo -e "  Run ${CYAN}swift build -c release${RESET} to see errors."
+        exit 1
+    fi
+
+    # Install files
+    mkdir -p "$INSTALL_DIR/hooks" "$BIN_DIR"
+    cp "$PULSE_DIR/.build/release/Pulse" "$BIN_DIR/pulse"
+    cp "$PULSE_DIR/hooks/pulse-hook.sh" "$INSTALL_DIR/hooks/"
+    cp "$PULSE_DIR/hooks/pulse-watcher.sh" "$INSTALL_DIR/hooks/"
+    cp "$PULSE_DIR/hooks/risky-patterns.json" "$INSTALL_DIR/hooks/"
+    chmod +x "$INSTALL_DIR/hooks/"*.sh
+    ok "Files installed"
+
+    # Register hooks
+    if [ ! -f "$SETTINGS" ]; then
+        mkdir -p "$(dirname "$SETTINGS")"
+        echo '{}' > "$SETTINGS"
+    fi
+
+    local temp
+    temp=$(mktemp)
+    jq --arg cmd "$HOOK_CMD" '
+        .hooks //= {} |
+        .hooks |= (to_entries | map(
+            .value |= map(select(.hooks | all(.command != $cmd)))
+        ) | from_entries) |
+        .hooks.PreToolUse = (.hooks.PreToolUse // []) + [
+            {matcher: "Bash", hooks: [{type: "command", command: $cmd, timeout: 5}]},
+            {matcher: "AskUserQuestion", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PostToolUse = (.hooks.PostToolUse // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PostToolUseFailure = (.hooks.PostToolUseFailure // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.Notification = (.hooks.Notification // []) + [
+            {matcher: "permission_prompt|idle_prompt", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.StopFailure = (.hooks.StopFailure // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.Stop = (.hooks.Stop // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.SessionStart = (.hooks.SessionStart // []) + [
+            {matcher: "startup", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.SessionEnd = (.hooks.SessionEnd // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ]
+    ' "$SETTINGS" > "$temp"
+    mv "$temp" "$SETTINGS"
+    ok "Hooks registered"
+
+    echo -e "\n${GREEN}${BOLD}Setup complete.${RESET} Run ${CYAN}./pulse start${RESET} to launch."
+}
+
+# ─────────────────────────────────────────────
+# start — launch Pulse
+# ─────────────────────────────────────────────
+cmd_start() {
+    if pgrep -f "\.local/bin/pulse" >/dev/null 2>&1; then
+        warn "Pulse is already running"
+        return
+    fi
+
+    if [ ! -x "$BIN_DIR/pulse" ]; then
+        fail "Pulse not installed. Run ${CYAN}./pulse setup${RESET} first."
+        exit 1
+    fi
+
+    nohup "$BIN_DIR/pulse" > /dev/null 2>&1 &
+    sleep 0.5
+
+    if pgrep -f "\.local/bin/pulse" >/dev/null 2>&1; then
+        ok "Pulse is running"
+    else
+        fail "Pulse failed to start"
+        exit 1
+    fi
+}
+
+# ─────────────────────────────────────────────
+# remove — stop, unregister, delete everything
+# ─────────────────────────────────────────────
+cmd_remove() {
+    echo -e "${BOLD}Removing Pulse${RESET}\n"
+
+    # Stop
+    if pgrep -f "\.local/bin/pulse" >/dev/null 2>&1; then
+        pkill -9 -f "\.local/bin/pulse" 2>/dev/null || true
+        sleep 0.3
+        ok "Stopped Pulse"
+    fi
+
+    pkill -f pulse-watcher 2>/dev/null || true
+
+    # Remove hooks
+    if [ -f "$SETTINGS" ]; then
+        local temp
+        temp=$(mktemp)
+        jq --arg cmd "$HOOK_CMD" '
+            .hooks |= (if . then
+                to_entries | map(
+                    .value |= map(select(.hooks | all(.command != $cmd)))
+                ) | from_entries
+            else . end)
+        ' "$SETTINGS" > "$temp"
+        mv "$temp" "$SETTINGS"
+        ok "Hooks removed"
+    fi
+
+    # Delete files
+    [ -f "$BIN_DIR/pulse" ] && { rm "$BIN_DIR/pulse"; ok "Binary removed"; }
+    [ -d "$INSTALL_DIR" ] && { rm -r "$INSTALL_DIR"; ok "Config removed"; }
+    [ -d "/tmp/pulse" ] && { rm -r "/tmp/pulse"; ok "State files cleaned"; }
+
+    echo -e "\n${GREEN}${BOLD}Pulse uninstalled.${RESET}"
+}
+
+# ─────────────────────────────────────────────
+# main
+# ─────────────────────────────────────────────
+case "${1:-help}" in
+    doctor) cmd_doctor ;;
+    setup)  cmd_setup ;;
+    start)  cmd_start ;;
+    remove) cmd_remove ;;
+    *)
+        echo -e "${BOLD}Pulse${RESET} — menu bar companion for Claude Code\n"
+        echo "Usage: ./pulse <command>"
+        echo ""
+        echo "  doctor   Check dependencies and installation status"
+        echo "  setup    Install dependencies, build, and register hooks"
+        echo "  start    Launch Pulse in the menu bar"
+        echo "  remove   Stop, unregister hooks, delete everything"
+        ;;
+esac

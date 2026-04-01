@@ -1,0 +1,20 @@
+{
+  "blockByDefault": false,
+  "patterns": [
+    {"pattern": "git push", "label": "git push", "mode": "warn"},
+    {"pattern": "git reset --hard", "label": "git reset --hard", "mode": "warn"},
+    {"pattern": "git rebase", "label": "git rebase", "mode": "warn"},
+    {"pattern": "rm -rf", "label": "rm -rf", "mode": "block"},
+    {"pattern": "rm -r /", "label": "rm -r /", "mode": "block"},
+    {"pattern": "rm ", "label": "rm", "mode": "warn"},
+    {"pattern": "sudo ", "label": "sudo", "mode": "block"},
+    {"pattern": "docker rm", "label": "docker rm", "mode": "warn"},
+    {"pattern": "docker system prune", "label": "docker prune", "mode": "warn"},
+    {"pattern": "chmod 777", "label": "chmod 777", "mode": "warn"},
+    {"pattern": "kill -9", "label": "kill -9", "mode": "warn"},
+    {"pattern": "npm publish", "label": "npm publish", "mode": "warn"},
+    {"pattern": "curl.*\\| bash", "label": "pipe to bash", "mode": "block"},
+    {"pattern": "mkfs", "label": "mkfs", "mode": "block"},
+    {"pattern": "> /dev/sd", "label": "write to device", "mode": "block"}
+  ]
+}
