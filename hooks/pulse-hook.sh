@@ -78,15 +78,9 @@ case "$EVENT" in
         ;;
     PostToolUse)
         echo 0 > "$STATE_DIR/${SESSION_ID}.failures" 2>/dev/null || true
-        # Let orange/red stay visible for 3 seconds before allowing green
+        # Keep orange/red visible -- only Stop event clears them
         CUR=$(current_state)
-        if [ "$CUR" = "orange" ] || [ "$CUR" = "red" ]; then
-            LAST=$(cat "$TIMESTAMP_FILE" 2>/dev/null || echo 0)
-            NOW=$(date +%s)
-            if [ $((NOW - LAST)) -ge 3 ]; then
-                write_state "green" "Running"
-            fi
-        else
+        if [ "$CUR" != "orange" ] && [ "$CUR" != "red" ]; then
             write_state "green" "Running"
         fi
         ;;
