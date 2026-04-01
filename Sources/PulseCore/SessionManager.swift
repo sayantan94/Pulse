@@ -18,6 +18,7 @@ public struct SessionInfo: Identifiable {
             task.launchPath = "/usr/bin/osascript"
             task.arguments = ["-e", script]
             try? task.run()
+            task.waitUntilExit()
         }
     }
 }
@@ -26,9 +27,11 @@ public final class SessionManager {
     public static let stateDirectory = "/tmp/pulse"
 
     private let directoryPath: String
+    private let onChange: ([SessionInfo]) -> Void
+    private let decoder = JSONDecoder()
+    private let queue = DispatchQueue(label: "pulse.session-manager")
     private var source: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
-    private let onChange: ([SessionInfo]) -> Void
     private var pendingScan: DispatchWorkItem?
     private var lastCleanup: Date = .distantPast
 
@@ -39,6 +42,8 @@ public final class SessionManager {
     }
 
     public func start() {
+        stop()
+
         let fm = FileManager.default
         if !fm.fileExists(atPath: directoryPath) {
             try? fm.createDirectory(atPath: directoryPath, withIntermediateDirectories: true)
@@ -47,23 +52,21 @@ public final class SessionManager {
         fileDescriptor = open(directoryPath, O_EVTONLY)
         guard fileDescriptor >= 0 else { return }
 
-        let source = DispatchSource.makeFileSystemObjectSource(
+        let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fileDescriptor,
             eventMask: [.write, .rename, .delete],
-            queue: DispatchQueue.global(qos: .default)
+            queue: queue
         )
-
-        source.setEventHandler { [weak self] in
-            self?.debouncedScan()
+        src.setEventHandler { [weak self] in self?.debouncedScan() }
+        src.setCancelHandler { [weak self] in
+            if let fd = self?.fileDescriptor, fd >= 0 {
+                close(fd)
+                self?.fileDescriptor = -1
+            }
         }
-
-        source.setCancelHandler { [weak self] in
-            if let fd = self?.fileDescriptor, fd >= 0 { close(fd) }
-        }
-
-        self.source = source
-        source.resume()
-        DispatchQueue.global().async { [weak self] in self?.scanAndNotify() }
+        source = src
+        src.resume()
+        queue.async { [weak self] in self?.scanAndNotify() }
     }
 
     public func stop() {
@@ -73,20 +76,17 @@ public final class SessionManager {
     }
 
     public func removeSession(_ id: String) {
-        let base = (directoryPath as NSString)
+        let base = directoryPath as NSString
         try? FileManager.default.removeItem(atPath: base.appendingPathComponent("\(id).json"))
         try? FileManager.default.removeItem(atPath: base.appendingPathComponent("\(id).ts"))
     }
 
-    // Debounce rapid FS events (hook writes .json + .ts back-to-back)
     private func debouncedScan() {
         pendingScan?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.scanAndNotify() }
         pendingScan = work
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15, execute: work)
+        queue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
-
-    private let decoder = JSONDecoder()
 
     private func scanAndNotify() {
         let fm = FileManager.default
@@ -98,12 +98,13 @@ public final class SessionManager {
 
         var sessions: [SessionInfo] = []
         for file in files where file.hasSuffix(".json") {
+            let sessionId = String(file.dropLast(5)) // strip ".json"
             let path = base.appendingPathComponent(file)
+
             guard let attrs = try? fm.attributesOfItem(atPath: path),
                   let modified = attrs[.modificationDate] as? Date else { continue }
 
             if shouldCleanup && now.timeIntervalSince(modified) > 300 {
-                let sessionId = file.replacingOccurrences(of: ".json", with: "")
                 try? fm.removeItem(atPath: path)
                 try? fm.removeItem(atPath: base.appendingPathComponent("\(sessionId).ts"))
                 continue
@@ -112,7 +113,6 @@ public final class SessionManager {
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                   let message = try? decoder.decode(PulseMessage.self, from: data) else { continue }
 
-            let sessionId = file.replacingOccurrences(of: ".json", with: "")
             sessions.append(SessionInfo(
                 sessionId: sessionId,
                 name: message.sessionName ?? sessionId,

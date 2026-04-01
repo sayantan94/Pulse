@@ -3,7 +3,6 @@ import SwiftUI
 public enum PulseState: String, Codable {
     case green, yellow, orange, red, gray
 
-    /// Bright color for dots, badges, indicators
     public var color: Color {
         switch self {
         case .green: return .green
@@ -14,7 +13,7 @@ public enum PulseState: String, Codable {
         }
     }
 
-public var nsColor: NSColor {
+    public var nsColor: NSColor {
         switch self {
         case .green: return .systemGreen
         case .yellow: return .systemYellow

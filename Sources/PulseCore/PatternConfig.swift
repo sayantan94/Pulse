@@ -19,9 +19,12 @@ public struct PatternConfig: Codable {
 public final class PatternStore: ObservableObject {
     @Published public var config: PatternConfig = PatternConfig(blockByDefault: false, patterns: [])
 
-    private static var configPath: String {
-        NSHomeDirectory() + "/.pulse/hooks/risky-patterns.json"
-    }
+    private static let configPath = NSHomeDirectory() + "/.pulse/hooks/risky-patterns.json"
+    private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
 
     public init() {
         load()
@@ -34,9 +37,7 @@ public final class PatternStore: ObservableObject {
     }
 
     public func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(config) else { return }
+        guard let data = try? Self.encoder.encode(config) else { return }
         try? data.write(to: URL(fileURLWithPath: Self.configPath), options: .atomic)
     }
 
