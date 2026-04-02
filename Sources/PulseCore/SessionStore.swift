@@ -9,10 +9,10 @@ public final class SessionStore: ObservableObject {
     private var spinAngle: Double = 0
     private var pulseOn = true
     private var pulseTickCount = 0
+    private var breathePhase: Double = 0
 
     private var icon: NSImage = NSImage()
     private var iconBold: NSImage = NSImage()
-    private var idleIcon: NSImage = NSImage()
     private let iconSize: CGFloat = 22
 
     public var topState: PulseState {
@@ -22,14 +22,19 @@ public final class SessionStore: ObservableObject {
     public init() {
         menuBarIcon = NSImage()
         loadIcon(symbol: PreferenceStore().iconSymbol)
+        startIdleTimer()
 
         manager = SessionManager { [weak self] sessions in
             guard let self else { return }
-            let wasAnimating = self.animTimer != nil
+            let wasActive = self.animTimer != nil
             self.sessions = sessions
-            let needsAnim = self.topState != .gray
-            if needsAnim && !wasAnimating { self.startAnimation() }
-            else if !needsAnim && wasAnimating { self.stopAnimation() }
+            let state = self.topState
+            if state != .gray && !wasActive {
+                self.startAnimation()
+            } else if state == .gray && wasActive {
+                self.stopAnimation()
+                self.startIdleTimer()
+            }
             self.refreshIcon()
         }
         manager?.start()
@@ -50,21 +55,23 @@ public final class SessionStore: ObservableObject {
         let bold = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
         icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(regular) ?? NSImage()
         iconBold = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(bold) ?? NSImage()
-
-        let s = iconSize
-        let idle = NSImage(size: NSSize(width: s, height: s), flipped: false) { [icon] rect in
-            let sz = icon.size
-            icon.draw(in: NSRect(x: (s - sz.width) / 2, y: (s - sz.height) / 2, width: sz.width, height: sz.height),
-                     from: .zero, operation: .sourceOver, fraction: 0.4)
-            return true
-        }
-        idle.isTemplate = true
-        idleIcon = idle
-        menuBarIcon = idle
+        menuBarIcon = renderBreathe(phase: breathePhase)
     }
 
     // MARK: - Animation
 
+    // Slow idle breathe (~2fps, subtle)
+    private func startIdleTimer() {
+        animTimer?.invalidate()
+        animTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 8.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.breathePhase += 0.04
+            if self.breathePhase >= 1.0 { self.breathePhase -= 1.0 }
+            self.refreshIcon()
+        }
+    }
+
+    // Active states (working/attention)
     private func startAnimation() {
         animTimer?.invalidate()
         animTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
@@ -92,13 +99,12 @@ public final class SessionStore: ObservableObject {
         pulseOn = true
         pulseTickCount = 0
         spinAngle = 0
-        refreshIcon()
     }
 
     private func refreshIcon() {
         switch topState {
         case .gray:
-            menuBarIcon = idleIcon
+            menuBarIcon = renderBreathe(phase: breathePhase)
         case .green:
             menuBarIcon = renderSpinning(angle: spinAngle)
         case .orange, .red, .yellow:
@@ -107,6 +113,38 @@ public final class SessionStore: ObservableObject {
     }
 
     // MARK: - Rendering
+
+    // Idle: slow color breathe (fades between muted blue and monochrome)
+    private func renderBreathe(phase: Double) -> NSImage {
+        let s = iconSize
+        // Sine wave: 0→1→0 over one cycle, smooth
+        let t = CGFloat(sin(phase * .pi * 2) * 0.5 + 0.5)
+        let alpha: CGFloat = 0.3 + t * 0.3 // 0.3 → 0.6
+        let tintAlpha: CGFloat = t * 0.6    // 0.0 → 0.6
+
+        let image = NSImage(size: NSSize(width: s, height: s), flipped: false) { [icon] rect in
+            // Draw base icon
+            let sz = icon.size
+            let x = (s - sz.width) / 2
+            let y = (s - sz.height) / 2
+            let drawRect = NSRect(x: x, y: y, width: sz.width, height: sz.height)
+
+            icon.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: alpha)
+
+            // Overlay soft blue tint
+            if tintAlpha > 0.05 {
+                let tinted = icon.copy() as! NSImage
+                tinted.lockFocus()
+                NSColor.systemCyan.withAlphaComponent(tintAlpha).set()
+                NSRect(origin: .zero, size: sz).fill(using: .sourceAtop)
+                tinted.unlockFocus()
+                tinted.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: tintAlpha)
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
 
     private func renderSpinning(angle: Double) -> NSImage {
         let s = iconSize
