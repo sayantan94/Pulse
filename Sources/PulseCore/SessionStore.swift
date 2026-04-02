@@ -10,10 +10,9 @@ public final class SessionStore: ObservableObject {
     private var pulseOn = true
     private var pulseTickCount = 0
 
-    // Cached assets -- loaded once
-    private let sparkle: NSImage
-    private let sparkleBold: NSImage
-    private let idleIcon: NSImage
+    private var icon: NSImage = NSImage()
+    private var iconBold: NSImage = NSImage()
+    private var idleIcon: NSImage = NSImage()
     private let iconSize: CGFloat = 22
 
     public var topState: PulseState {
@@ -21,21 +20,8 @@ public final class SessionStore: ObservableObject {
     }
 
     public init() {
-        let regular = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        let bold = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
-        sparkle = NSImage(systemSymbolName: "sparkle", accessibilityDescription: nil)?.withSymbolConfiguration(regular) ?? NSImage()
-        sparkleBold = NSImage(systemSymbolName: "sparkle", accessibilityDescription: nil)?.withSymbolConfiguration(bold) ?? NSImage()
-
-        let s: CGFloat = 22
-        let idle = NSImage(size: NSSize(width: s, height: s), flipped: false) { [sparkle] rect in
-            let sz = sparkle.size
-            sparkle.draw(in: NSRect(x: (s - sz.width) / 2, y: (s - sz.height) / 2, width: sz.width, height: sz.height),
-                        from: .zero, operation: .sourceOver, fraction: 0.4)
-            return true
-        }
-        idle.isTemplate = true
-        idleIcon = idle
-        menuBarIcon = idle
+        menuBarIcon = NSImage()
+        loadIcon(symbol: PreferenceStore().iconSymbol)
 
         manager = SessionManager { [weak self] sessions in
             guard let self else { return }
@@ -52,6 +38,29 @@ public final class SessionStore: ObservableObject {
     deinit {
         animTimer?.invalidate()
         manager?.stop()
+    }
+
+    public func updateIcon(symbol: String) {
+        loadIcon(symbol: symbol)
+        refreshIcon()
+    }
+
+    private func loadIcon(symbol: String) {
+        let regular = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let bold = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+        icon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(regular) ?? NSImage()
+        iconBold = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(bold) ?? NSImage()
+
+        let s = iconSize
+        let idle = NSImage(size: NSSize(width: s, height: s), flipped: false) { [icon] rect in
+            let sz = icon.size
+            icon.draw(in: NSRect(x: (s - sz.width) / 2, y: (s - sz.height) / 2, width: sz.width, height: sz.height),
+                     from: .zero, operation: .sourceOver, fraction: 0.4)
+            return true
+        }
+        idle.isTemplate = true
+        idleIcon = idle
+        menuBarIcon = idle
     }
 
     // MARK: - Animation
@@ -99,29 +108,21 @@ public final class SessionStore: ObservableObject {
 
     // MARK: - Rendering
 
-    private func drawSparkleCentered(_ symbol: NSImage, in rect: NSRect) {
-        let sz = symbol.size
-        let x = (rect.width - sz.width) / 2
-        let y = (rect.height - sz.height) / 2
-        symbol.draw(in: NSRect(x: x, y: y, width: sz.width, height: sz.height))
-    }
-
     private func renderSpinning(angle: Double) -> NSImage {
         let s = iconSize
-        let image = NSImage(size: NSSize(width: s, height: s), flipped: true) { [sparkle] rect in
+        let image = NSImage(size: NSSize(width: s, height: s), flipped: true) { [icon] rect in
             let center = NSPoint(x: s / 2, y: s / 2)
             let arc = NSBezierPath()
             arc.appendArc(withCenter: center, radius: 9.5,
                          startAngle: CGFloat(angle), endAngle: CGFloat(angle) + 230, clockwise: false)
             arc.lineWidth = 1.5
             arc.lineCapStyle = .round
-            // Black with template=true: macOS auto-flips for dark mode
             NSColor.black.withAlphaComponent(0.4).setStroke()
             arc.stroke()
-            let sz = sparkle.size
+            let sz = icon.size
             let x = (s - sz.width) / 2
             let y = (s - sz.height) / 2
-            sparkle.draw(in: NSRect(x: x, y: y, width: sz.width, height: sz.height))
+            icon.draw(in: NSRect(x: x, y: y, width: sz.width, height: sz.height))
             return true
         }
         image.isTemplate = true
@@ -131,11 +132,11 @@ public final class SessionStore: ObservableObject {
     private func renderPulse(state: PulseState, on: Bool) -> NSImage {
         let s = iconSize
         let alpha: CGFloat = on ? 1.0 : 0.2
-        let image = NSImage(size: NSSize(width: s, height: s), flipped: false) { [sparkleBold] rect in
-            let tinted = sparkleBold.copy() as! NSImage
+        let image = NSImage(size: NSSize(width: s, height: s), flipped: false) { [iconBold] rect in
+            let tinted = iconBold.copy() as! NSImage
             tinted.lockFocus()
             state.nsColor.withAlphaComponent(alpha).set()
-            NSRect(origin: .zero, size: sparkleBold.size).fill(using: .sourceAtop)
+            NSRect(origin: .zero, size: iconBold.size).fill(using: .sourceAtop)
             tinted.unlockFocus()
             let sz = tinted.size
             let x = (s - sz.width) / 2

@@ -7,9 +7,11 @@ struct PulseApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            PulseMenuView(sessions: store.sessions) { session in
-                store.dismissSession(session)
-            }
+            PulseMenuView(
+                sessions: store.sessions,
+                onDismiss: { store.dismissSession($0) },
+                onIconChange: { store.updateIcon(symbol: $0) }
+            )
         } label: {
             Image(nsImage: store.menuBarIcon)
         }

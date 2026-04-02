@@ -3,12 +3,15 @@ import SwiftUI
 public struct PulseMenuView: View {
     public let sessions: [SessionInfo]
     public var onDismiss: ((SessionInfo) -> Void)?
+    public var onIconChange: ((String) -> Void)?
     @State private var settingsCollapsed = false
     @StateObject private var patterns = PatternStore()
+    @StateObject private var prefs = PreferenceStore()
 
-    public init(sessions: [SessionInfo], onDismiss: ((SessionInfo) -> Void)? = nil) {
+    public init(sessions: [SessionInfo], onDismiss: ((SessionInfo) -> Void)? = nil, onIconChange: ((String) -> Void)? = nil) {
         self.sessions = sessions
         self.onDismiss = onDismiss
+        self.onIconChange = onIconChange
     }
 
     private var active: [SessionInfo] { sessions.filter { $0.state != .gray } }
@@ -98,6 +101,8 @@ public struct PulseMenuView: View {
             .buttonStyle(.plain)
 
             if !settingsCollapsed {
+                IconPicker(prefs: prefs, onIconChange: onIconChange)
+                Divider().padding(.leading, 16)
                 SettingsView(patterns: patterns)
             }
         }
@@ -114,6 +119,49 @@ public struct PulseMenuView: View {
             Spacer()
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Icon Picker
+
+struct IconPicker: View {
+    @ObservedObject var prefs: PreferenceStore
+    var onIconChange: ((String) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Icon")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(availableIcons) { icon in
+                        Button(action: {
+                            prefs.setIcon(icon.symbol)
+                            onIconChange?(icon.symbol)
+                        }) {
+                            Image(systemName: icon.symbol)
+                                .font(.system(size: 13))
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(prefs.iconSymbol == icon.symbol ? Color.accentColor.opacity(0.15) : Color.clear)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(prefs.iconSymbol == icon.symbol ? Color.accentColor : Color.clear, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help(icon.label)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
         .padding(.vertical, 8)
     }
 }
