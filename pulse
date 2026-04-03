@@ -178,8 +178,29 @@ cmd_setup() {
         .hooks.PostToolUseFailure = (.hooks.PostToolUseFailure // []) + [
             {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ] |
+        .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // []) + [
+            {hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PermissionRequest = (.hooks.PermissionRequest // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PermissionDenied = (.hooks.PermissionDenied // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.SubagentStart = (.hooks.SubagentStart // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.SubagentStop = (.hooks.SubagentStop // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
         .hooks.Notification = (.hooks.Notification // []) + [
-            {matcher: "permission_prompt|idle_prompt", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+            {matcher: "permission_prompt|idle_prompt|auth_success", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PreCompact = (.hooks.PreCompact // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.PostCompact = (.hooks.PostCompact // []) + [
+            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ] |
         .hooks.StopFailure = (.hooks.StopFailure // []) + [
             {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
@@ -188,10 +209,10 @@ cmd_setup() {
             {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ] |
         .hooks.SessionStart = (.hooks.SessionStart // []) + [
-            {matcher: "startup", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.SessionEnd = (.hooks.SessionEnd // []) + [
             {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+        ] |
+        .hooks.CwdChanged = (.hooks.CwdChanged // []) + [
+            {hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ]
     ' "$SETTINGS" > "$temp"
     mv "$temp" "$SETTINGS"

@@ -6,6 +6,7 @@ public final class SessionStore: ObservableObject {
 
     private var manager: SessionManager?
     private var animTimer: Timer?
+    private var isActiveAnimation = false
     private var spinAngle: Double = 0
     private var pulseOn = true
     private var pulseTickCount = 0
@@ -26,12 +27,11 @@ public final class SessionStore: ObservableObject {
 
         manager = SessionManager { [weak self] sessions in
             guard let self else { return }
-            let wasActive = self.animTimer != nil
             self.sessions = sessions
             let state = self.topState
-            if state != .gray && !wasActive {
+            if state != .gray && state != .blue && !self.isActiveAnimation {
                 self.startAnimation()
-            } else if state == .gray && wasActive {
+            } else if (state == .gray || state == .blue) && self.isActiveAnimation {
                 self.stopAnimation()
                 self.startIdleTimer()
             }
@@ -74,6 +74,7 @@ public final class SessionStore: ObservableObject {
     // Active states (working/attention)
     private func startAnimation() {
         animTimer?.invalidate()
+        isActiveAnimation = true
         animTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             switch self.topState {
@@ -86,7 +87,7 @@ public final class SessionStore: ObservableObject {
                     self.pulseOn.toggle()
                     self.pulseTickCount = 0
                 }
-            case .gray:
+            case .blue, .gray:
                 break
             }
             self.refreshIcon()
@@ -96,6 +97,7 @@ public final class SessionStore: ObservableObject {
     private func stopAnimation() {
         animTimer?.invalidate()
         animTimer = nil
+        isActiveAnimation = false
         pulseOn = true
         pulseTickCount = 0
         spinAngle = 0
@@ -107,6 +109,8 @@ public final class SessionStore: ObservableObject {
             menuBarIcon = renderBreathe(phase: breathePhase)
         case .green:
             menuBarIcon = renderSpinning(angle: spinAngle)
+        case .blue:
+            menuBarIcon = renderStatic(state: .blue)
         case .orange, .red, .yellow:
             menuBarIcon = renderPulse(state: topState, on: pulseOn)
         }
@@ -164,6 +168,24 @@ public final class SessionStore: ObservableObject {
             return true
         }
         image.isTemplate = true
+        return image
+    }
+
+    private func renderStatic(state: PulseState) -> NSImage {
+        let s = iconSize
+        let image = NSImage(size: NSSize(width: s, height: s), flipped: false) { [iconBold] rect in
+            let tinted = iconBold.copy() as! NSImage
+            tinted.lockFocus()
+            state.nsColor.withAlphaComponent(1.0).set()
+            NSRect(origin: .zero, size: iconBold.size).fill(using: .sourceAtop)
+            tinted.unlockFocus()
+            let sz = tinted.size
+            let x = (s - sz.width) / 2
+            let y = (s - sz.height) / 2
+            tinted.draw(in: NSRect(x: x, y: y, width: sz.width, height: sz.height))
+            return true
+        }
+        image.isTemplate = false
         return image
     }
 

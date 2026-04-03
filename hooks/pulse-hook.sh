@@ -104,12 +104,43 @@ case "$EVENT" in
             write_state "red" "Stuck: $COUNT consecutive failures"
         fi
         ;;
+    UserPromptSubmit)
+        # User sent a prompt — Claude is about to work
+        write_state "green" "Prompt received"
+        ;;
+    PermissionRequest)
+        # Permission dialog shown — user needs to approve
+        write_state "yellow" "Permission: $TOOL"
+        ;;
+    PermissionDenied)
+        # Auto mode denied a tool
+        REASON=$(jq -r '.reason // "denied"' <<< "$INPUT" | head -c 50)
+        write_state "orange" "Denied: $TOOL"
+        ;;
+    SubagentStart)
+        AGENT_TYPE=$(jq -r '.agent_type // "agent"' <<< "$INPUT")
+        write_state "green" "Subagent: $AGENT_TYPE"
+        ;;
+    SubagentStop)
+        # Subagent finished — back to running
+        CUR=$(current_state)
+        if [ "$CUR" != "orange" ] && [ "$CUR" != "red" ] && [ "$CUR" != "yellow" ]; then
+            write_state "green" "Running"
+        fi
+        ;;
     Notification)
         NTYPE=$(jq -r '.notification_type // empty' <<< "$INPUT")
         case "$NTYPE" in
             permission_prompt) write_state "yellow" "Permission: $TOOL" ;;
             idle_prompt) write_state "yellow" "Idle prompt" ;;
+            auth_success) write_state "green" "Authenticated" ;;
         esac
+        ;;
+    PreCompact)
+        write_state "green" "Compacting context..."
+        ;;
+    PostCompact)
+        write_state "green" "Running"
         ;;
     StopFailure)
         ERROR_TYPE=$(jq -r '.error_type // "unknown"' <<< "$INPUT")
@@ -117,7 +148,7 @@ case "$EVENT" in
         ;;
     Stop)
         echo 0 > "$STATE_DIR/${SESSION_ID}.failures" 2>/dev/null || true
-        write_state "yellow" "Response ready" 5
+        write_state "blue" "Response ready"
         ;;
     SessionStart)
         # Detect and cache terminal PID (only once per session)
@@ -140,9 +171,15 @@ case "$EVENT" in
             echo $! > "$WATCHER_PID_FILE"
         fi
         ;;
-    SessionEnd)
-        write_state "gray" "Session ended"
-        rm -f "$STATE_DIR/${SESSION_ID}.ts" "$STATE_DIR/${SESSION_ID}.failures" "$STATE_DIR/${SESSION_ID}.pid" "$CWD_CACHE"
+    CwdChanged)
+        # Working directory changed — update session name
+        NEW_CWD=$(jq -r '.new_cwd // ""' <<< "$INPUT")
+        if [ -n "$NEW_CWD" ]; then
+            SESSION_NAME="${CLAUDE_SESSION_NAME:-$NEW_CWD}"
+            echo "$NEW_CWD" > "$CWD_CACHE"
+            CUR=$(current_state)
+            write_state "${CUR:-green}" "Running"
+        fi
         ;;
 esac
 

@@ -33,6 +33,7 @@ public final class SessionManager {
     private var source: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
     private var pendingScan: DispatchWorkItem?
+    private var ttlTimer: DispatchSourceTimer?
     private var lastCleanup: Date = .distantPast
 
     public init(directoryPath: String = SessionManager.stateDirectory,
@@ -66,11 +67,21 @@ public final class SessionManager {
         }
         source = src
         src.resume()
+
+        // Periodic re-scan so TTL-based expiry works even without file changes
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in self?.scanAndNotify() }
+        ttlTimer = timer
+        timer.resume()
+
         queue.async { [weak self] in self?.scanAndNotify() }
     }
 
     public func stop() {
         pendingScan?.cancel()
+        ttlTimer?.cancel()
+        ttlTimer = nil
         source?.cancel()
         source = nil
     }
@@ -113,10 +124,18 @@ public final class SessionManager {
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                   let message = try? decoder.decode(PulseMessage.self, from: data) else { continue }
 
+            // If TTL is set and expired, treat as gray
+            let effectiveState: PulseState
+            if let ttl = message.ttl, now.timeIntervalSince(modified) > Double(ttl) {
+                effectiveState = .gray
+            } else {
+                effectiveState = message.state
+            }
+
             sessions.append(SessionInfo(
                 sessionId: sessionId,
                 name: message.sessionName ?? sessionId,
-                state: message.state,
+                state: effectiveState,
                 label: message.label,
                 ttl: message.ttl,
                 terminalPid: message.terminalPid,

@@ -4,14 +4,20 @@
 set -euo pipefail
 
 STATE_DIR="/tmp/pulse"
-IDLE_THRESHOLD=120
-STUCK_THRESHOLD=60
 EMPTY_CHECKS=0
+
+fmt_duration() {
+    local secs=$1
+    if [ "$secs" -ge 60 ]; then
+        echo "$((secs / 60))m"
+    else
+        echo "${secs}s"
+    fi
+}
 
 write_state() {
     local session="$1" state="$2" label="$3"
     local state_file="$STATE_DIR/${session}.json"
-    # Single jq: read existing fields + set new state
     local json
     json=$(jq --arg s "$state" --arg l "$label" \
         '. + {state: $s, label: $l}' "$state_file" 2>/dev/null) || return
@@ -38,17 +44,37 @@ while true; do
         NOW=$(date +%s)
         ELAPSED=$((NOW - LAST_ACTIVITY))
 
-        # Single jq read
         CURRENT_STATE=$(jq -r '.state // "gray"' "$state_file" 2>/dev/null || echo "gray")
 
         [ "$CURRENT_STATE" = "red" ] && continue
         [ "$CURRENT_STATE" = "gray" ] && continue
 
-        if [ "$ELAPSED" -ge "$STUCK_THRESHOLD" ] && [ "$CURRENT_STATE" = "yellow" ]; then
-            write_state "$session" "orange" "Idle: no activity for ${ELAPSED}s"
-        elif [ "$ELAPSED" -ge "$IDLE_THRESHOLD" ] && [ "$CURRENT_STATE" = "green" ]; then
-            write_state "$session" "orange" "Idle: waiting for you"
-        fi
+        DUR=$(fmt_duration "$ELAPSED")
+
+        case "$CURRENT_STATE" in
+            yellow)
+                # Waiting for input — nudge after 60s
+                if [ "$ELAPSED" -ge 60 ]; then
+                    write_state "$session" "orange" "Idle: waiting for input ($DUR)"
+                fi
+                ;;
+            green)
+                # Working but no activity — nudge after 120s
+                if [ "$ELAPSED" -ge 120 ]; then
+                    write_state "$session" "orange" "Idle: no activity ($DUR)"
+                fi
+                ;;
+            blue)
+                # Response ready — fade to gray after 60s
+                if [ "$ELAPSED" -ge 60 ]; then
+                    write_state "$session" "gray" "Session idle"
+                fi
+                ;;
+            orange)
+                # Already idle — keep updating the duration
+                write_state "$session" "orange" "Idle ($DUR)"
+                ;;
+        esac
     done
 
     if [ "$found_active" = false ]; then
