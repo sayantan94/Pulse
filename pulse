@@ -163,60 +163,64 @@ cmd_setup() {
 
     local temp
     temp=$(mktemp)
+    local hook_entry='[{matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}]'
     jq --arg cmd "$HOOK_CMD" '
         .hooks //= {} |
         .hooks |= (to_entries | map(
             .value |= map(select(.hooks | all(.command != $cmd)))
         ) | from_entries) |
+
+        # Tool events
         .hooks.PreToolUse = (.hooks.PreToolUse // []) + [
             {matcher: "Bash", hooks: [{type: "command", command: $cmd, timeout: 5}]},
             {matcher: "AskUserQuestion", hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ] |
-        .hooks.PostToolUse = (.hooks.PostToolUse // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.PostToolUseFailure = (.hooks.PostToolUseFailure // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // []) + [
-            {hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.PermissionRequest = (.hooks.PermissionRequest // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.PermissionDenied = (.hooks.PermissionDenied // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.SubagentStart = (.hooks.SubagentStart // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.SubagentStop = (.hooks.SubagentStop // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
+        .hooks.PostToolUse = (.hooks.PostToolUse // []) + '"$hook_entry"' |
+        .hooks.PostToolUseFailure = (.hooks.PostToolUseFailure // []) + '"$hook_entry"' |
+
+        # User & permission events
+        .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // []) + '"$hook_entry"' |
+        .hooks.PermissionRequest = (.hooks.PermissionRequest // []) + '"$hook_entry"' |
+        .hooks.PermissionDenied = (.hooks.PermissionDenied // []) + '"$hook_entry"' |
+
+        # Agent events
+        .hooks.SubagentStart = (.hooks.SubagentStart // []) + '"$hook_entry"' |
+        .hooks.SubagentStop = (.hooks.SubagentStop // []) + '"$hook_entry"' |
+        .hooks.TeammateIdle = (.hooks.TeammateIdle // []) + '"$hook_entry"' |
+
+        # Session lifecycle
+        .hooks.SessionStart = (.hooks.SessionStart // []) + '"$hook_entry"' |
+        .hooks.SessionEnd = (.hooks.SessionEnd // []) + '"$hook_entry"' |
+        .hooks.Stop = (.hooks.Stop // []) + '"$hook_entry"' |
+        .hooks.StopFailure = (.hooks.StopFailure // []) + '"$hook_entry"' |
+
+        # Context & config
+        .hooks.PreCompact = (.hooks.PreCompact // []) + '"$hook_entry"' |
+        .hooks.PostCompact = (.hooks.PostCompact // []) + '"$hook_entry"' |
+        .hooks.CwdChanged = (.hooks.CwdChanged // []) + '"$hook_entry"' |
+        .hooks.InstructionsLoaded = (.hooks.InstructionsLoaded // []) + '"$hook_entry"' |
+        .hooks.ConfigChange = (.hooks.ConfigChange // []) + '"$hook_entry"' |
+
+        # Task tracking
+        .hooks.TaskCreated = (.hooks.TaskCreated // []) + '"$hook_entry"' |
+        .hooks.TaskCompleted = (.hooks.TaskCompleted // []) + '"$hook_entry"' |
+
+        # MCP & elicitation
+        .hooks.Elicitation = (.hooks.Elicitation // []) + '"$hook_entry"' |
+        .hooks.ElicitationResult = (.hooks.ElicitationResult // []) + '"$hook_entry"' |
         .hooks.Notification = (.hooks.Notification // []) + [
-            {matcher: "permission_prompt|idle_prompt|auth_success", hooks: [{type: "command", command: $cmd, timeout: 5}]}
+            {matcher: "permission_prompt|idle_prompt|auth_success|elicitation_dialog", hooks: [{type: "command", command: $cmd, timeout: 5}]}
         ] |
-        .hooks.PreCompact = (.hooks.PreCompact // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.PostCompact = (.hooks.PostCompact // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.StopFailure = (.hooks.StopFailure // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.Stop = (.hooks.Stop // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.SessionStart = (.hooks.SessionStart // []) + [
-            {matcher: "", hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ] |
-        .hooks.CwdChanged = (.hooks.CwdChanged // []) + [
-            {hooks: [{type: "command", command: $cmd, timeout: 5}]}
-        ]
+
+        # Worktree events
+        .hooks.WorktreeCreate = (.hooks.WorktreeCreate // []) + '"$hook_entry"' |
+        .hooks.WorktreeRemove = (.hooks.WorktreeRemove // []) + '"$hook_entry"' |
+
+        # File watching
+        .hooks.FileChanged = (.hooks.FileChanged // []) + '"$hook_entry"'
     ' "$SETTINGS" > "$temp"
     mv "$temp" "$SETTINGS"
-    ok "Hooks registered"
+    ok "Hooks registered (26 events)"
 
     echo -e "\n${GREEN}${BOLD}Setup complete.${RESET} Run ${CYAN}./pulse start${RESET} to launch."
 }
@@ -280,8 +284,8 @@ cmd_remove() {
 
     # Delete files
     [ -f "$BIN_DIR/pulse" ] && { rm "$BIN_DIR/pulse"; ok "Binary removed"; }
-    [ -d "$INSTALL_DIR" ] && { rm -r "$INSTALL_DIR"; ok "Config removed"; }
-    [ -d "/tmp/pulse" ] && { rm -r "/tmp/pulse"; ok "State files cleaned"; }
+    [ -d "$INSTALL_DIR" ] && { rm -rf "$INSTALL_DIR"; ok "Config removed"; }
+    [ -d "/tmp/pulse" ] && { rm -rf "/tmp/pulse"; ok "State files cleaned (json, stats, log, meta, prompt, tasks)"; }
 
     echo -e "\n${GREEN}${BOLD}Pulse uninstalled.${RESET}"
 }

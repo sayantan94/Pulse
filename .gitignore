@@ -6,4 +6,5 @@ DerivedData/
 .DS_Store
 docs
 .claude
+.superpowers
 *.mov
